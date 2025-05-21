@@ -1,3 +1,5 @@
+import os
+
 # Scrapy settings for medscraper project
 #
 # For simplicity, this file contains only settings considered important or
@@ -6,6 +8,8 @@
 #     https://docs.scrapy.org/en/latest/topics/settings.html
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 BOT_NAME = "medscraper"
 
@@ -64,9 +68,10 @@ ROBOTSTXT_OBEY = True
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "medscraper.pipelines.MedscraperPipeline": 300,
-#}
+ITEM_PIPELINES = {"scrapy.pipelines.files.FilesPipeline": 1}
+
+# Local storage for testing saving scraped policy documents
+FILES_STORE = os.path.join(BASE_DIR, 'policy-docs')
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

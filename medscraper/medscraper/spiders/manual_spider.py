@@ -22,8 +22,14 @@ class ManualSpider(scrapy.Spider):
             yield scrapy.Request(url=url, callback=self.parse)
 
     def parse(self, response):
+        docs = []
         all_links = response.css('a::attr(href)').getall()
-        pdfs = [response.urljoin(link) for link in all_links if re.search(r'\.pdf$', link, re.IGNORECASE)]
 
-        self.logger.info(f"PDF LINKS: {pdfs}")
+        for link in all_links:
+            if re.search(r'\.pdf$', link, re.IGNORECASE):
+                docs.append(response.urljoin(link))
+            elif re.search(r'\.docx$', link, re.IGNORECASE):
+                docs.append(response.urljoin(link))
+
+        self.logger.info(f"LINKS: {docs}")
 
