@@ -2,11 +2,11 @@
 #
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/items.html
+from scrapy.item import Item, Field
 
-import scrapy
-
-
-class MedscraperItem(scrapy.Item):
+class PolicyManualsPackage(Item):
     # define the fields for your item here like:
-    # name = scrapy.Field()
+    file_urls = Field()
+    files = Field()
+    package_download_date = Field()
     pass
