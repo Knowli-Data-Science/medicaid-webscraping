@@ -9,4 +9,7 @@ class PolicyManualsPackage(Item):
     file_urls = Field()
     files = Field()
     package_download_date = Field()
+    package_site_path = Field()
+    package_file_count = Field()
+    package_state = Field()
     pass

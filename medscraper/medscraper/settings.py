@@ -68,10 +68,13 @@ ROBOTSTXT_OBEY = True
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-ITEM_PIPELINES = {"scrapy.pipelines.files.FilesPipeline": 1}
+ITEM_PIPELINES = {"medscraper.pipelines.MedscraperPipeline": 1}
 
 # Local storage for testing saving scraped policy documents
 FILES_STORE = os.path.join(BASE_DIR, 'policy-docs')
+
+# 30 days of delay for files expiration
+FILES_EXPIRES = 30
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
