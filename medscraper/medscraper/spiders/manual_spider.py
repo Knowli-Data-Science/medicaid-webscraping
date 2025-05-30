@@ -13,7 +13,7 @@ class ManualSpider(scrapy.Spider):
 
     async def start(self):
         urls = [
-            # "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
+            "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
             # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
             # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
             "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
@@ -51,8 +51,25 @@ class ManualSpider(scrapy.Spider):
 
         self.logger.info(f"Package downloaded. Timestamp: {timestamp}")
         file_package_item = loader.load_item()
-        df = pd.DataFrame([file_package_item])
-        print("Pandas DataFrame Representation: \n", df.to_string())
+        
+        master_table = pd.read_csv("medscraper/policy-docs/data/master_table.csv")
+        state_table = pd.read_csv("medscraper/policy-docs/data/state_table.csv")
+        file_count_table = pd.read_csv("medscraper/policy-docs/data/file_count_table.csv")
+        
+        new_master_record = pd.DataFrame([file_package_item])
+        new_state_record = pd.DataFrame(new_master_record.loc[:, ["package_state", "package_site_path", "package_file_count"]])
+        new_filecount_record = pd.DataFrame(new_master_record.loc[:, ["package_state", "package_file_count"]])
+        
+        master_table = pd.concat([master_table, new_master_record], ignore_index=True)
+        state_table = pd.concat([state_table, new_state_record], ignore_index=True)
+        file_count_table = pd.concat([file_count_table, new_filecount_record], ignore_index=True)
+        
+        print("Main DataFrame Table: \n", master_table.to_string())
+        print("State Link Table: \n", state_table.to_string())
+        print("State File Count Table: \n", file_count_table.to_string())
+        
+        master_table.to_csv("medscraper/policy-docs/data/master_table.csv")
+        state_table.to_csv("medscraper/policy-docs/data/state_table.csv")
+        file_count_table.to_csv("medscraper/policy-docs/data/file_count_table.csv")
         return file_package_item
-
 
