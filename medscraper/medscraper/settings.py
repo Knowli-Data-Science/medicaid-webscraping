@@ -71,7 +71,8 @@ ROBOTSTXT_OBEY = True
 ITEM_PIPELINES = {"medscraper.pipelines.MedscraperPipeline": 1}
 
 # Local storage for testing saving scraped policy documents
-FILES_STORE = os.path.join(BASE_DIR, 'policy-docs')
+# FILES_STORE = os.path.join(BASE_DIR, 'policy-docs')
+FILES_STORE = "s3://webscraped-docs-test/policy-docs/"
 
 # 30 days of delay for files expiration
 FILES_EXPIRES = 30
