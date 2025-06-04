@@ -35,20 +35,32 @@ class ManualSpider(scrapy.Spider):
             # Otherwise, form new dataframes in the correct configuration
             match file_path:
                 case "doc-data/master_table.csv":
-                    loader = ItemLoader(item=PolicyManualsPackage())
-                    return pd.DataFrame([loader.load_item()])
+                    return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_download_date"])
                 case "doc-data/state_table.csv":
                     return pd.DataFrame(columns=["package_state", "package_site_path", "package_file_count"])
                 case "doc-data/file_count_table.csv":
                     return pd.DataFrame(columns=["package_state", "package_file_count"])
+                
+    def insert_or_update(df: pd.DataFrame, new_record: pd.Series):
+        compare_cols = [col for col in df.columns if col != "package_download_date"]
+        compare_record = pd.Series(new_record)[compare_cols]
+        mask = (df[compare_cols] == compare_record).all(axis=1)
+
+        if mask.any():
+            df.loc[mask, "package_download_date"] = new_record["package_download_date"]
+        else:
+            df.loc[len(df)] = new_record
+        
+        return df
                     
     async def start(self):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
-            "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
+            "https://aaaaspider.com",
+            # "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
             # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
             # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
-            "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
+            # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
             # "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
             # "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
             # "http://www1.scdhhs.gov/mppm/",
@@ -68,9 +80,10 @@ class ManualSpider(scrapy.Spider):
 
         # Parse the entire site's text, search for which state the package is associated with, and load it into the item
         site_text = response.text
+        loader.add_value("package_state", "None")
         for state in us.states.STATES:
             if state.name in site_text:
-                loader.add_value("package_state", state.name)
+                loader.replace_value("package_state", state.name)
 
         # Collect every link on the site leading to either a .pdf or a .docx file, and retrieve/store the full url
         file_urls = []
@@ -101,18 +114,18 @@ class ManualSpider(scrapy.Spider):
         file_count_table = ManualSpider.fetch_doc_data("doc-data/file_count_table.csv")
         
         # Create new dataframe records from currently collected metadata in the item
-        new_master_record = pd.DataFrame([file_package_item])
-        new_state_record = pd.DataFrame(new_master_record.loc[:, ["package_state", "package_site_path", "package_file_count"]])
-        new_filecount_record = pd.DataFrame(new_master_record.loc[:, ["package_state", "package_file_count"]])
-        
+        new_master_record = pd.Series(dict(file_package_item))
+        new_state_record = new_master_record[["package_state", "package_site_path", "package_file_count"]]
+        new_filecount_record = new_master_record[["package_state", "package_file_count"]]
+
         # Insert new file package metadata records into appropriate tables, and print the resulting tables to the console for confirmation
-        master_table = pd.concat([master_table, new_master_record], ignore_index=True)
-        state_table = pd.concat([state_table, new_state_record], ignore_index=True)
-        file_count_table = pd.concat([file_count_table, new_filecount_record], ignore_index=True)
+        master_table = ManualSpider.insert_or_update(master_table, new_master_record)
+        state_table = ManualSpider.insert_or_update(state_table, new_state_record)
+        file_count_table = ManualSpider.insert_or_update(file_count_table, new_filecount_record)
         
-        print("Main DataFrame Table: \n", master_table.to_string())
-        print("State Link Table: \n", state_table.to_string())
-        print("State File Count Table: \n", file_count_table.to_string())
+        print("Main DataFrame Table: \n", master_table)
+        print("State Link Table: \n", state_table)
+        print("State File Count Table: \n", file_count_table)
         
         # Finally, upload new file package metadata dataframes to s3 bucket
         try:
