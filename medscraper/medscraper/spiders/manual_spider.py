@@ -3,6 +3,7 @@ from pathlib import Path
 import io
 import scrapy
 import re
+import ast
 import us.states
 import pandas as pd
 import boto3
@@ -35,19 +36,46 @@ class ManualSpider(scrapy.Spider):
             # Otherwise, form new dataframes in the correct configuration
             match file_path:
                 case "doc-data/master_table.csv":
-                    return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_download_date"])
+                    return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_retrieval_date", "package_last_checked"])
                 case "doc-data/state_table.csv":
                     return pd.DataFrame(columns=["package_state", "package_site_path", "package_file_count"])
                 case "doc-data/file_count_table.csv":
                     return pd.DataFrame(columns=["package_state", "package_file_count"])
                 
     def insert_or_update(df: pd.DataFrame, new_record: pd.Series):
-        compare_cols = [col for col in df.columns if col != "package_download_date"]
-        compare_record = pd.Series(new_record)[compare_cols]
-        mask = (df[compare_cols] == compare_record).all(axis=1)
+        ignore_cols = {"package_retrieval_date", "package_last_checked"}
+        compare_cols = [col for col in df.columns if col not in ignore_cols]
+
+        def normalize(value):
+            if isinstance(value, str):
+                # Try to parse list-like strings into real lists
+                try:
+                    parsed = ast.literal_eval(value)
+                    if isinstance(parsed, list):
+                        return tuple(parsed)
+                except (ValueError, SyntaxError):
+                    pass
+                return value.strip()
+            if isinstance(value, list):
+                return tuple(value)
+            return value
+        
+        compare_df = df[compare_cols].map(normalize)
+        compare_record = pd.Series({k: normalize(new_record[k]) for k in compare_cols})
+
+        mask = (compare_df == compare_record).all(axis=1)
+
+        # for idx, row in df[compare_cols].iterrows():
+        #     print(f"\n--- Row {idx} ---")
+        #     for col in compare_cols:
+        #         df_val = row[col]
+        #         record_val = new_record[col]
+        #         print(f"Column: {col}")
+        #         print(f"  DataFrame value: {df_val!r} (type: {type(df_val)})")
+        #         print(f"  New record value: {record_val!r} (type: {type(record_val)})")
 
         if mask.any():
-            df.loc[mask, "package_download_date"] = new_record["package_download_date"]
+            df.loc[mask, "package_last_checked"] = new_record["package_last_checked"]
         else:
             df.loc[len(df)] = new_record
         
@@ -67,6 +95,18 @@ class ManualSpider(scrapy.Spider):
             # "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
             # "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
         ]
+        allowed_domains = [
+            "https://aaaaspider.com",
+            "https://ahca.myflorida.com/medicaid/rules",
+            "https://pamms.dhs.ga.gov/dfcs/medicaid",
+            "https://www.kymmis.com/kymmis",
+            "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy",
+            "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals",
+            "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual",
+            "http://www1.scdhhs.gov/mppm",
+            "https://www.nctracks.nc.gov/content/public/providers",
+            "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
+            ]
         for url in urls:
             yield scrapy.Request(url=url, callback=self.parse)
 
@@ -99,7 +139,8 @@ class ManualSpider(scrapy.Spider):
 
         # Generate a timestamp for when these files and metadata were retrieved, and load them into the item
         timestamp = datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
-        loader.add_value("package_download_date", timestamp)
+        loader.add_value("package_retrieval_date", timestamp)
+        loader.add_value("package_last_checked", timestamp)
 
         # Load the current site path the spider is on into the item
         loader.add_value("package_site_path", response.url)
@@ -126,6 +167,10 @@ class ManualSpider(scrapy.Spider):
         print("Main DataFrame Table: \n", master_table)
         print("State Link Table: \n", state_table)
         print("State File Count Table: \n", file_count_table)
+
+        master_table.to_csv("medscraper/policy-docs/master_table.csv")
+        state_table.to_csv("medscraper/policy-docs/state_table.csv")
+        file_count_table.to_csv("medscraper/policy-docs/file_count_table.csv")
         
         # Finally, upload new file package metadata dataframes to s3 bucket
         try:

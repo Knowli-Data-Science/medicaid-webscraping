@@ -8,7 +8,8 @@ class PolicyManualsPackage(Item):
     # define the fields for your item here like:
     file_urls = Field()
     files = Field()
-    package_download_date = Field()
+    package_retrieval_date = Field()
+    package_last_checked = Field()
     package_site_path = Field()
     package_file_count = Field()
     package_state = Field()
