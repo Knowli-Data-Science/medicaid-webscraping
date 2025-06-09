@@ -4,6 +4,17 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
 from scrapy import signals
+import boto3
+import hashlib
+import os
+from pathlib import PurePosixPath
+from scrapy.utils.httpobj import urlparse_cached
+from scrapy.exceptions import IgnoreRequest
+from botocore.errorfactory import ClientError
+from urllib.parse import urlparse, unquote
+
+# S3 Bucket setting
+S3_BUCKET = 'webscraped-docs-test'
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
@@ -84,7 +95,18 @@ class MedscraperDownloaderMiddleware:
         # - return a Response object
         # - return a Request object
         # - or raise IgnoreRequest
-        return response
+        s3 = boto3.client('s3')
+        try:
+            key = "policy-docs/full/" + os.path.basename(unquote(urlparse(request.url).path))
+            file = s3.get_object(Bucket=S3_BUCKET, Key=key)
+            if hashlib.md5(response.body).hexdigest() != hashlib.md5(file['Body'].read()).hexdigest():
+                spider.logger.debug("HASH CHANGED, SAVING!")
+                return response
+            else:
+                raise IgnoreRequest
+        except ClientError as e:
+            print("ERROR RESPONSE:", e.response)
+            return response
 
     def process_exception(self, request, exception, spider):
         # Called when a download handler or a process_request()

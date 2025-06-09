@@ -34,15 +34,9 @@ class ManualSpider(scrapy.Spider):
             print(e.response)
 
             # Otherwise, form new dataframes in the correct configuration
-            match file_path:
-                case "doc-data/master_table.csv":
-                    return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_retrieval_date", "package_last_checked"])
-                case "doc-data/state_table.csv":
-                    return pd.DataFrame(columns=["package_state", "package_site_path", "package_file_count"])
-                case "doc-data/file_count_table.csv":
-                    return pd.DataFrame(columns=["package_state", "package_file_count"])
+            return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_retrieval_date", "package_last_checked"])
                 
-    def insert_or_update(df: pd.DataFrame, new_record: pd.Series):
+    def insert_or_update(df: pd.DataFrame, new_record: pd.Series) -> pd.DataFrame:
         ignore_cols = {"package_retrieval_date", "package_last_checked"}
         compare_cols = [col for col in df.columns if col not in ignore_cols]
 
@@ -80,7 +74,7 @@ class ManualSpider(scrapy.Spider):
             df.loc[len(df)] = new_record
         
         return df
-                    
+    
     async def start(self):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
@@ -120,7 +114,7 @@ class ManualSpider(scrapy.Spider):
 
         # Parse the entire site's text, search for which state the package is associated with, and load it into the item
         site_text = response.text
-        loader.add_value("package_state", "None")
+        loader.add_value("package_state", "Invalid")
         for state in us.states.STATES:
             if state.name in site_text:
                 loader.replace_value("package_state", state.name)
@@ -151,26 +145,19 @@ class ManualSpider(scrapy.Spider):
 
         # Fetch current policy document metadata from s3 bucket, or create new dataframes for them if they dont exist
         master_table = ManualSpider.fetch_doc_data("doc-data/master_table.csv")
-        state_table = ManualSpider.fetch_doc_data("doc-data/state_table.csv")
-        file_count_table = ManualSpider.fetch_doc_data("doc-data/file_count_table.csv")
         
         # Create new dataframe records from currently collected metadata in the item
-        new_master_record = pd.Series(dict(file_package_item))
-        new_state_record = new_master_record[["package_state", "package_site_path", "package_file_count"]]
-        new_filecount_record = new_master_record[["package_state", "package_file_count"]]
+        new_record = pd.Series(dict(file_package_item))
 
         # Insert new file package metadata records into appropriate tables, and print the resulting tables to the console for confirmation
-        master_table = ManualSpider.insert_or_update(master_table, new_master_record)
-        state_table = ManualSpider.insert_or_update(state_table, new_state_record)
-        file_count_table = ManualSpider.insert_or_update(file_count_table, new_filecount_record)
-        
-        print("Main DataFrame Table: \n", master_table)
-        print("State Link Table: \n", state_table)
-        print("State File Count Table: \n", file_count_table)
+        print("MASTER TABLE BEFORE: ", master_table)
 
-        master_table.to_csv("medscraper/policy-docs/master_table.csv")
-        state_table.to_csv("medscraper/policy-docs/state_table.csv")
-        file_count_table.to_csv("medscraper/policy-docs/file_count_table.csv")
+        master_table = ManualSpider.insert_or_update(master_table, new_record)
+
+        print("MASTER TABLE AFTER: ", master_table)
+        
+        state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
+        file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
         
         # Finally, upload new file package metadata dataframes to s3 bucket
         try:
