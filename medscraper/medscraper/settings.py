@@ -56,9 +56,9 @@ ROBOTSTXT_OBEY = True
 
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-DOWNLOADER_MIDDLEWARES = {
-   "medscraper.middlewares.MedscraperDownloaderMiddleware": 543,
-}
+# DOWNLOADER_MIDDLEWARES = {
+#    "medscraper.middlewares.MedscraperDownloaderMiddleware": 543,
+# }
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
@@ -71,11 +71,19 @@ DOWNLOADER_MIDDLEWARES = {
 ITEM_PIPELINES = {"medscraper.pipelines.MedscraperPipeline": 1}
 
 # Local storage for testing saving scraped policy documents
-# FILES_STORE = os.path.join(BASE_DIR, 'policy-docs')
 FILES_STORE = "s3://webscraped-docs-test/policy-docs/"
 
+# S3 Bucket settings
+S3_BUCKET = 'webscraped-docs-test'
+S3_FOLDER = 'policy-docs/full'
+
+MEDIA_ALLOW_REDIRECTS = True
+MEDIA_PIPELINES_ENABLED = True
+
 # 30 days of delay for files expiration
-FILES_EXPIRES = 30
+FILES_EXPIRES = 0
+
+FILES_CHECK_CONTENTS = False
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

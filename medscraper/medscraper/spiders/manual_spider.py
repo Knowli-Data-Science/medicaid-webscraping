@@ -158,6 +158,10 @@ class ManualSpider(scrapy.Spider):
         
         state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
         file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
+
+        master_table.to_csv("medscraper/policy-docs/master_table.csv")
+        state_table.to_csv("medscraper/policy-docs/state_table.csv")
+        file_count_table.to_csv("medscraper/policy-docs/file_count_table.csv")
         
         # Finally, upload new file package metadata dataframes to s3 bucket
         try:

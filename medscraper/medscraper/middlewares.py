@@ -13,9 +13,6 @@ from scrapy.exceptions import IgnoreRequest
 from botocore.errorfactory import ClientError
 from urllib.parse import urlparse, unquote
 
-# S3 Bucket setting
-S3_BUCKET = 'webscraped-docs-test'
-
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
 
@@ -68,11 +65,18 @@ class MedscraperDownloaderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
     # scrapy acts as if the downloader middleware does not modify the
     # passed objects.
+    def __init__(self, s3_bucket, s3_folder):
+        self.s3_bucket = s3_bucket
+        self.s3_folder = s3_folder
+        self.s3 = boto3.client('s3')
 
     @classmethod
     def from_crawler(cls, crawler):
         # This method is used by Scrapy to create your spiders.
-        s = cls()
+        s = cls(
+            s3_bucket=crawler.settings.get('S3_BUCKET'),
+            s3_folder=crawler.settings.get('S3_FOLDER')
+        )
         crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
         return s
 
@@ -95,19 +99,45 @@ class MedscraperDownloaderMiddleware:
         # - return a Response object
         # - return a Request object
         # - or raise IgnoreRequest
-        s3 = boto3.client('s3')
-        try:
-            key = "policy-docs/full/" + os.path.basename(unquote(urlparse(request.url).path))
-            file = s3.get_object(Bucket=S3_BUCKET, Key=key)
-            if hashlib.md5(response.body).hexdigest() != hashlib.md5(file['Body'].read()).hexdigest():
-                spider.logger.debug("HASH CHANGED, SAVING!")
-                return response
-            else:
-                raise IgnoreRequest
-        except ClientError as e:
-            print("ERROR RESPONSE:", e.response)
+        is_file = response.headers.get('Content-Type', b'').decode().lower()
+        print("HERE IS FILE: ", is_file)
+        print("RESPONSE: ", response.url)
+        if not is_file or 'application' not in is_file:
+            print("IS NOT FILE HERE")
             return response
+        
+        new_file_hash = hashlib.md5(response.body).hexdigest()
 
+        file_key = f"{self.s3_folder}/{self.get_s3_key(response.url)}"
+
+        if self.s3_file_exists(file_key):
+            local_file_hash = self.get_s3_file_hash(file_key)
+            if new_file_hash == local_file_hash:
+                spider.logger.info(f"[S3 Middleware] File contents unchanged; Skipping file: {file_key}")
+                raise IgnoreRequest
+            
+        return response
+        
+    def get_s3_key(self, url):
+        path = urlparse(url).path
+        return os.path.basename(unquote(path))
+    
+    def s3_file_exists(self, key):
+        try:
+            self.s3.head_object(Bucket=self.s3_bucket, Key=key)
+            return True
+        except ClientError as e:
+            print(e.response)
+            if e.response['Error']['Code'] == '404':
+                return False
+            raise
+
+    def get_s3_file_hash(self, key):
+        file = self.s3.get_object(Bucket=self.s3_bucket, Key=key)
+        body = file['Body'].read()
+        print("FILE BODY: ", body)
+        return hashlib.md5(body).hexdigest()
+            
     def process_exception(self, request, exception, spider):
         # Called when a download handler or a process_request()
         # (from other downloader middleware) raises an exception.
