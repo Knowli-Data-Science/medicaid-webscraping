@@ -75,7 +75,6 @@ FILES_STORE = "s3://webscraped-docs-test/policy-docs/"
 
 # S3 Bucket settings
 S3_BUCKET = 'webscraped-docs-test'
-S3_FOLDER = 'policy-docs/full'
 
 MEDIA_ALLOW_REDIRECTS = True
 MEDIA_PIPELINES_ENABLED = True
