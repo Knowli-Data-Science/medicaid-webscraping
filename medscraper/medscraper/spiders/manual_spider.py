@@ -20,6 +20,19 @@ S3_BUCKET = 'webscraped-docs-test'
 # each individual site
 class ManualSpider(scrapy.Spider):
     name = "manuals"
+    
+    allowed_domains = [
+        "aaaaspider.com",
+        "ahca.myflorida.com",
+        "pamms.dhs.ga.gov",
+        "www.kymmis.com",
+        "www.tn.gov",
+        "medicaid.alabama.gov",
+        "medicaid.ms.gov",
+        "www1.scdhhs.gov",
+        "www.nctracks.nc.gov",
+        "www.dmas.virginia.gov"
+    ]
 
     # Helper function, fetching each metadata dataframe if it exists in the s3 bucket, and creating new ones if not
     def fetch_doc_data(file_path):
@@ -75,11 +88,14 @@ class ManualSpider(scrapy.Spider):
         
         return df
     
+    def is_allowed_url(self, url):
+        return any(url.startswith(prefix) for prefix in self.allowed_domains)
+    
     async def start(self):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
-            "https://aaaaspider.com",
-            # "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
+            # "https://aaaaspider.com",
+            "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
             # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
             # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
             # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
@@ -89,18 +105,20 @@ class ManualSpider(scrapy.Spider):
             # "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
             # "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
         ]
-        allowed_domains = [
-            "https://aaaaspider.com",
-            "https://ahca.myflorida.com/medicaid/rules",
-            "https://pamms.dhs.ga.gov/dfcs/medicaid",
-            "https://www.kymmis.com/kymmis",
-            "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy",
-            "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals",
-            "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual",
-            "http://www1.scdhhs.gov/mppm",
-            "https://www.nctracks.nc.gov/content/public/providers",
-            "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
-            ]
+        
+        # allowed_domains = [
+        #     "https://aaaaspider.com",
+        #     "https://ahca.myflorida.com/medicaid/rules",
+        #     "https://pamms.dhs.ga.gov/dfcs/medicaid",
+        #     "https://www.kymmis.com/kymmis",
+        #     "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy",
+        #     "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals",
+        #     "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual",
+        #     "http://www1.scdhhs.gov/mppm",
+        #     "https://www.nctracks.nc.gov/content/public/providers",
+        #     "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
+        # ]
+        
         for url in urls:
             yield scrapy.Request(url=url, callback=self.parse)
 
@@ -122,8 +140,12 @@ class ManualSpider(scrapy.Spider):
         # Collect every link on the site leading to either a .pdf or a .docx file, and retrieve/store the full url
         file_urls = []
         for link in all_links:
+            full_link = response.urljoin(link)
             if re.search(r'\.pdf$', link, re.IGNORECASE) or re.search(r'\.docx$', link, re.IGNORECASE):
-                file_urls.append(response.urljoin(link))
+                file_urls.append(full_link)
+            
+            if self.is_allowed_url(full_link):
+                yield scrapy.Request(full_link, self.parse)
                 
         # Convert the list of links to a dict to filter out duplicates, convert back to a list to preserve the lexicographic order,
         # then load all the links and the link count into the item
@@ -150,12 +172,8 @@ class ManualSpider(scrapy.Spider):
         new_record = pd.Series(dict(file_package_item))
 
         # Insert new file package metadata records into appropriate tables, and print the resulting tables to the console for confirmation
-        print("MASTER TABLE BEFORE: ", master_table)
-
         master_table = ManualSpider.insert_or_update(master_table, new_record)
 
-        print("MASTER TABLE AFTER: ", master_table)
-        
         state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
         file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
 

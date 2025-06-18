@@ -1,4 +1,8 @@
 import os
+import logging
+
+logging.getLogger('botocore').setLevel(logging.DEBUG)
+logging.getLogger('boto3').setLevel(logging.DEBUG)
 
 # Scrapy settings for medscraper project
 #
@@ -71,7 +75,7 @@ ROBOTSTXT_OBEY = True
 ITEM_PIPELINES = {"medscraper.pipelines.MedscraperPipeline": 1}
 
 # Local storage for testing saving scraped policy documents
-FILES_STORE = "s3://webscraped-docs-test/policy-docs/"
+FILES_STORE = "s3://webscraped-docs-test/"
 
 # S3 Bucket settings
 S3_BUCKET = 'webscraped-docs-test'
@@ -82,7 +86,9 @@ MEDIA_PIPELINES_ENABLED = True
 # 30 days of delay for files expiration
 FILES_EXPIRES = 0
 
-FILES_CHECK_CONTENTS = False
+FILES_CHECK_CONTENTS = True
+
+LOG_LEVEL = 'DEBUG'
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

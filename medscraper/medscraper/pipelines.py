@@ -29,29 +29,18 @@ class MedscraperPipeline(FilesPipeline):
         return pipeline
 
     def get_media_requests(self, item, info):
-        logger.info("HITTING MEDIA REQUESTS")
         for file_url in item.get("file_urls", []):
             yield scrapy.Request(file_url, meta={"item": item})
 
     def file_path(self, request, response=None, info=None, *, item=None):
         return "policy-docs/full/" + urlparse(request.url).path.split("/")[-1]
 
-    # def media_to_download(self, request, info, *, item=None):
-    #     logger.info("HITTING MEDIA TO DOWNLOAD")
-    #     # Decides whether the file should be downloaded based on hash comparison.
-    #     file_key = self.file_path(request, info=info, item=item)
-
-    #     try:
-    #         s3_file = self.s3.get_object(Bucket=self.s3_bucket, Key=file_key)
-    #         existing_hash = hashlib.sha256(s3_file["Body"].read()).hexdigest()
-    #         request.meta["existing_hash"] = existing_hash
-    #         logger.info(f"[S3 File Pipeline] Existing file hash for {file_key}: {existing_hash}")
-    #     except self.s3.exceptions.NoSuchKey:
-    #         logger.info(f"[S3 File Pipeline] No existing file found for {file_key}, will download.")
-    #         return True
-
-    #     # Proceed with download to compare hashes after download
-    #     return True
+    def media_downloaded(self, response, request, info, *, item=None):
+        """Called after a file is downloaded but before it's stored."""
+        logger.info(f"[S3 File Pipeline] About to store file: {request.url}")
+        result = super().media_downloaded(response, request, info, item=item)
+        logger.info(f"[S3 File Pipeline] File storage result: {result}")
+        return result
 
     def file_downloaded(self, response, request, info, *, item=None):
         # Compares the new hash to the existing one from S3
@@ -67,20 +56,49 @@ class MedscraperPipeline(FilesPipeline):
 
             if new_hash == existing_hash:
                 logger.info(f"[S3 File Pipeline] Skipping unchanged file: {file_key}")
+                item["file_urls"].remove(request.url)
                 raise DropItem(f"[S3 File Pipeline] File unchanged: {file_key}")
             else:
                 logger.info(f"[S3 File Pipeline] Changed file {file_key}; Downloading...")
+                item["file_urls"].append(request.url)
+                content_type = self._get_content_type(file_key)            
+                self.s3.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=file_key,
+                    Body=response.body,
+                    ContentType=content_type
+                )
         except self.s3.exceptions.NoSuchKey:
             logger.info(f"[S3 File Pipeline] New file {file_key}; Downloading...")
+            item["file_urls"].append(request.url)
+            content_type = self._get_content_type(file_key)            
+            self.s3.put_object(
+                Bucket=self.s3_bucket,
+                Key=file_key,
+                Body=response.body,
+                ContentType=content_type
+            )
 
-        return {
-            "url": request.url,
-            "path": file_key,
-            "checksum": new_hash,
-        }
+        return new_hash
     
     def media_failed(self, failure, request, info, *, item=None):
         logger.error(f"Media failed for {request.url}: {failure}")
+    
+    def _get_content_type(self, file_key):
+        """Determine content type based on file extension."""
+        extension = file_key.lower().split('.')[-1]
+        content_types = {
+            'pdf': 'application/pdf',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt': 'text/plain',
+            'csv': 'text/csv',
+            'html': 'text/html',
+            'htm': 'text/html',
+            'json': 'application/json',
+            'xml': 'application/xml',
+        }
+        return content_types.get(extension, 'application/octet-stream')
 
 
     
