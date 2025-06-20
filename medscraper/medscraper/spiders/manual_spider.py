@@ -33,6 +33,19 @@ class ManualSpider(scrapy.Spider):
         "www.nctracks.nc.gov",
         "www.dmas.virginia.gov"
     ]
+    
+    valid_base_urls = [
+        "https://aaaaspider.com",
+        "https://ahca.myflorida.com/medicaid/rules",
+        "https://pamms.dhs.ga.gov/dfcs/medicaid",
+        "https://www.kymmis.com/kymmis",
+        "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy",
+        "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals",
+        "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual",
+        "http://www1.scdhhs.gov/mppm",
+        "https://www.nctracks.nc.gov/content/public/providers",
+        "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
+    ]
 
     # Helper function, fetching each metadata dataframe if it exists in the s3 bucket, and creating new ones if not
     def fetch_doc_data(file_path):
@@ -89,35 +102,22 @@ class ManualSpider(scrapy.Spider):
         return df
     
     def is_allowed_url(self, url):
-        return any(url.startswith(prefix) for prefix in self.allowed_domains)
+        return any(url.startswith(prefix) for prefix in self.valid_base_urls)
     
     async def start(self):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
-            # "https://aaaaspider.com",
+            "https://aaaaspider.com",
             "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
-            # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
-            # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
-            # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
-            # "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
-            # "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
-            # "http://www1.scdhhs.gov/mppm/",
-            # "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
-            # "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
+            "https://pamms.dhs.ga.gov/dfcs/medicaid/",
+            "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
+            "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
+            "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
+            "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
+            "http://www1.scdhhs.gov/mppm/",
+            "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
+            "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
         ]
-        
-        # allowed_domains = [
-        #     "https://aaaaspider.com",
-        #     "https://ahca.myflorida.com/medicaid/rules",
-        #     "https://pamms.dhs.ga.gov/dfcs/medicaid",
-        #     "https://www.kymmis.com/kymmis",
-        #     "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy",
-        #     "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals",
-        #     "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual",
-        #     "http://www1.scdhhs.gov/mppm",
-        #     "https://www.nctracks.nc.gov/content/public/providers",
-        #     "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
-        # ]
         
         for url in urls:
             yield scrapy.Request(url=url, callback=self.parse)
@@ -198,5 +198,5 @@ class ManualSpider(scrapy.Spider):
             print(e.response)
 
         # Return the fully populated file package item, which uploads all collected policy documents to s3 bucket
-        return file_package_item
+        yield file_package_item
 
