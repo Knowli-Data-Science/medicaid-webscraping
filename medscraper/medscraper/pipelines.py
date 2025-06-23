@@ -36,8 +36,6 @@ class MedscraperPipeline(FilesPipeline):
         return "policy-docs/full/" + urlparse(request.url).path.split("/")[-1]
 
     def media_downloaded(self, response, request, info, *, item=None):
-        """Called after a file is downloaded but before it's stored."""
-        logger.info(f"[S3 File Pipeline] About to store file: {request.url}")
         result = super().media_downloaded(response, request, info, item=item)
         logger.info(f"[S3 File Pipeline] File storage result: {result}")
         return result

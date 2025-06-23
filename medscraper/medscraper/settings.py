@@ -86,8 +86,6 @@ MEDIA_PIPELINES_ENABLED = True
 # 30 days of delay for files expiration
 FILES_EXPIRES = 0
 
-FILES_CHECK_CONTENTS = True
-
 LOG_LEVEL = 'DEBUG'
 
 # Enable and configure the AutoThrottle extension (disabled by default)

@@ -24,18 +24,20 @@ class ManualSpider(scrapy.Spider):
     allowed_domains = [
         "aaaaspider.com",
         "ahca.myflorida.com",
+        "flrules.org",
         "pamms.dhs.ga.gov",
         "www.kymmis.com",
         "www.tn.gov",
         "medicaid.alabama.gov",
         "medicaid.ms.gov",
         "www1.scdhhs.gov",
+        "img1.scdhhs.gov",
         "www.nctracks.nc.gov",
         "www.dmas.virginia.gov"
     ]
     
     valid_base_urls = [
-        "https://aaaaspider.com",
+        # "https://aaaaspider.com",
         "https://ahca.myflorida.com/medicaid/rules",
         "https://pamms.dhs.ga.gov/dfcs/medicaid",
         "https://www.kymmis.com/kymmis",
@@ -46,6 +48,18 @@ class ManualSpider(scrapy.Spider):
         "https://www.nctracks.nc.gov/content/public/providers",
         "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual"
     ]
+    
+    state_dict = {
+        "https://ahca.myflorida.com/": "Florida",
+        "https://pamms.dhs.ga.gov/dfcs/": "Georgia",
+        "https://www.kymmis.com/": "Kentucky",
+        "https://www.tn.gov/": "Tennessee",
+        "https://medicaid.alabama.gov/": "Alabama",
+        "https://medicaid.ms.gov/": "Mississippi",
+        "http://www1.scdhhs.gov/": "South Carolina",
+        "https://www.nctracks.nc.gov/": "North Carolina",
+        "https://www.dmas.virginia.gov/": "Virginia"
+    }
 
     # Helper function, fetching each metadata dataframe if it exists in the s3 bucket, and creating new ones if not
     def fetch_doc_data(file_path):
@@ -107,16 +121,16 @@ class ManualSpider(scrapy.Spider):
     async def start(self):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
-            "https://aaaaspider.com",
+            # "https://aaaaspider.com",
             "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
-            "https://pamms.dhs.ga.gov/dfcs/medicaid/",
-            "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
-            "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
-            "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
-            "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
-            "http://www1.scdhhs.gov/mppm/",
-            "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
-            "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
+            # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
+            # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
+            # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
+            # "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
+            # "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
+            # "http://www1.scdhhs.gov/mppm/",
+            # "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
+            # "https://www.dmas.virginia.gov/for-applicants/eligibility-guidance/eligibility-manual/"
         ]
         
         for url in urls:
@@ -131,11 +145,17 @@ class ManualSpider(scrapy.Spider):
         all_links = response.css('a::attr(href)').getall()
 
         # Parse the entire site's text, search for which state the package is associated with, and load it into the item
-        site_text = response.text
+        # site_text = response.text
+        # loader.add_value("package_state", "Invalid")
+        # for state in us.states.STATES:
+        #     if state.name in site_text:
+        #         loader.replace_value("package_state", state.name)
+        
+        # Check the current link's prefix against the stored dict to find its matching associated state
         loader.add_value("package_state", "Invalid")
-        for state in us.states.STATES:
-            if state.name in site_text:
-                loader.replace_value("package_state", state.name)
+        for state_url in self.state_dict.keys():
+            if response.url.startswith(state_url):
+                loader.replace_value("package_state", self.state_dict[state_url])
 
         # Collect every link on the site leading to either a .pdf or a .docx file, and retrieve/store the full url
         file_urls = []
