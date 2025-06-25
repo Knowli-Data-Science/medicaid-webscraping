@@ -7,6 +7,7 @@ import ast
 import us.states
 import pandas as pd
 import boto3
+import logging
 from medscraper.items import PolicyManualsPackage
 from scrapy.loader import ItemLoader
 from datetime import datetime
@@ -14,6 +15,8 @@ from botocore.errorfactory import ClientError
 
 # S3 Bucket setting
 S3_BUCKET = 'webscraped-docs-test'
+
+logger = logging.getLogger(__name__)
 
 # Custom scrapy spider class ManualSpider; extracts the most recent Billing Provider Policy Manual document files from state healthcare
 # sites, uploads the relevant/updated files, and collects and uploads metadata about the sites it visits and the files downloaded from
@@ -108,8 +111,22 @@ class ManualSpider(scrapy.Spider):
         #         print(f"  DataFrame value: {df_val!r} (type: {type(df_val)})")
         #         print(f"  New record value: {record_val!r} (type: {type(record_val)})")
 
-        if mask.any():
+
+
+        if mask.any():     
             df.loc[mask, "package_last_checked"] = new_record["package_last_checked"]
+            
+            site_mask = (compare_df["package_site_path"] != compare_record["package_site_path"])
+            
+            if site_mask.any():
+                df_first_file = normalize(df.loc[mask, 'file_urls'].iloc[0])[0]
+                nr_first_file = new_record['file_urls'][0]
+            
+                if df_first_file == nr_first_file:
+                    logger.info("DUPLICATE FILES DETECTED")
+                    logger.info(f"OLD DF: {df.to_markdown()}")
+                    df.loc[site_mask, "package_site_path"] = df.loc[site_mask, "package_site_path"] + ", " + (new_record["package_site_path"])
+                    logger.info(f"NEW DF: {df.to_markdown()}") 
         else:
             df.loc[len(df)] = new_record
         
@@ -122,11 +139,11 @@ class ManualSpider(scrapy.Spider):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
             # "https://aaaaspider.com",
-            "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
+            # "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
             # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
             # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
             # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
-            # "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
+            "https://medicaid.alabama.gov/content/Gated/7.6.1G_Provider_Manuals/7.6.1.2G_Apr2025.aspx",
             # "https://medicaid.ms.gov/eligibility-policy-and-procedures-manual/",
             # "http://www1.scdhhs.gov/mppm/",
             # "https://www.nctracks.nc.gov/content/public/providers/provider-manuals.html",
