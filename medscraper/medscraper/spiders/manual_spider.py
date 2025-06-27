@@ -101,7 +101,9 @@ class ManualSpider(scrapy.Spider):
         compare_record = pd.Series({k: normalize(new_record[k]) for k in compare_cols})
 
         mask = (compare_df == compare_record).all(axis=1)
-
+        
+        file_mask = compare_df[compare_df['file_urls'].apply(lambda x: bool(set(x).intersection(set(compare_record['file_urls']))))]
+        
         # for idx, row in df[compare_cols].iterrows():
         #     print(f"\n--- Row {idx} ---")
         #     for col in compare_cols:
@@ -111,22 +113,29 @@ class ManualSpider(scrapy.Spider):
         #         print(f"  DataFrame value: {df_val!r} (type: {type(df_val)})")
         #         print(f"  New record value: {record_val!r} (type: {type(record_val)})")
 
-
-
         if mask.any():     
             df.loc[mask, "package_last_checked"] = new_record["package_last_checked"]
             
-            site_mask = (compare_df["package_site_path"] != compare_record["package_site_path"])
-            
-            if site_mask.any():
-                df_first_file = normalize(df.loc[mask, 'file_urls'].iloc[0])[0]
-                nr_first_file = new_record['file_urls'][0]
-            
-                if df_first_file == nr_first_file:
-                    logger.info("DUPLICATE FILES DETECTED")
-                    logger.info(f"OLD DF: {df.to_markdown()}")
-                    df.loc[site_mask, "package_site_path"] = df.loc[site_mask, "package_site_path"] + ", " + (new_record["package_site_path"])
-                    logger.info(f"NEW DF: {df.to_markdown()}") 
+            if not file_mask.empty:
+                logger.info("DUPLICATE FILES DETECTED:")
+                
+                matched_rows = set().union(*file_mask['file_urls'])
+                nr_files = set(new_record['file_urls'])
+                unique_files = matched_rows - nr_files
+                        
+                if unique_files:
+                    new_record['file_urls'] = list(unique_files)
+                    df.loc[len(df)] = new_record
+        elif not file_mask.empty:
+                logger.info("DUPLICATE FILES DETECTED:")
+                
+                matched_rows = set().union(*file_mask['file_urls'])
+                nr_files = set(new_record['file_urls'])
+                unique_files = matched_rows - nr_files
+                        
+                if unique_files:
+                    new_record['file_urls'] = list(unique_files)
+                    df.loc[len(df)] = new_record
         else:
             df.loc[len(df)] = new_record
         
