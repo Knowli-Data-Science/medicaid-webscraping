@@ -5,13 +5,20 @@
 
 
 # useful for handling different item types with a single interface
+import io
 import hashlib
 import boto3
 import scrapy
 import logging
+import ast
+import pandas as pd
 from urllib.parse import urlparse
 from scrapy.pipelines.files import FilesPipeline
 from scrapy.exceptions import DropItem
+from botocore.errorfactory import ClientError
+
+# S3 Bucket setting
+S3_BUCKET = 'webscraped-docs-test'
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +104,142 @@ class MedscraperPipeline(FilesPipeline):
             'xml': 'application/xml',
         }
         return content_types.get(extension, 'application/octet-stream')
+    
+    # Helper function, fetching the main metadata dataframe if it exists in the s3 bucket, and creating a new one if not
+    def fetch_doc_data(self, file_path):
+        s3 = boto3.client('s3')
 
+        try:
+            # Fetch the requested file's dataframe from the s3 bucket if it exists
+            obj = s3.get_object(Bucket=S3_BUCKET, Key=file_path)
+            table = pd.read_csv(obj['Body'])
+            return table
+        except ClientError as e:
+            print(e.response)
+
+            # Otherwise, form new dataframes in the correct configuration
+            return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_retrieval_date", "package_last_checked"])
+        
+    # Function for inserting new records, or updating previous records after sanitization, and prevention of duplicate records to the dataframe 
+    def insert_or_update(self, df: pd.DataFrame, new_record: pd.Series) -> pd.DataFrame:    
+        # Helper function to sanitize incoming data from dataframes/series
+        def normalize(value):
+            if isinstance(value, str):
+                # Try to parse list-like strings into real lists
+                try:
+                    parsed = ast.literal_eval(value)
+                    if isinstance(parsed, list):
+                        return tuple(parsed)
+                except (ValueError, SyntaxError):
+                    pass
+                return value.strip()
+            if isinstance(value, list):
+                return tuple(value)
+            return value
+        
+        # Create a set of which columns to ignore and which to consider when making comparisons;
+        # ignore timestamps, and create a list of every other column to compare between main table and new record
+        ignore_cols = {"package_retrieval_date", "package_last_checked"}
+        compare_cols = [col for col in df.columns if col not in ignore_cols]
+
+        # Take only the considered columns from the table and new record, and normalize them
+        normalized_df = df[compare_cols].map(normalize)
+        normalized_record = pd.Series({k: normalize(new_record[k]) for k in compare_cols})
+
+        # Get only the rows from the table containing any of the file URLs present in the new record
+        file_mask = normalized_df[normalized_df['file_urls'].apply(lambda x: bool(set(x).intersection(set(normalized_record['file_urls']))))]
+        
+        # for idx, row in df[compare_cols].iterrows():
+        #     print(f"\n--- Row {idx} ---")
+        #     for col in compare_cols:
+        #         df_val = row[col]
+        #         record_val = new_record[col]
+        #         print(f"Column: {col}")
+        #         print(f"  DataFrame value: {df_val!r} (type: {type(df_val)})")
+        #         print(f"  New record value: {record_val!r} (type: {type(record_val)})")
+
+        # If there exist any rows from the table which contain a file URL matching one in the new record,
+        if not file_mask.empty:
+            # Create a new set containing every file URL from every row that was retrieved
+            matched_rows = set().union(*file_mask['file_urls'])
+            # Make a set out of the new record's file URLs
+            nr_files = set(new_record['file_urls'])
+            # Subtract the matched files from the new record's set of file URLs, and whatever is left is new
+            unique_files = nr_files - matched_rows
+                    
+            # If there are any unique files left,
+            if unique_files:
+                # Set the normalized record's list of files to the list of unique files, for comparison
+                normalized_record['file_urls'] = tuple(unique_files)
+                
+                # Retrieve the row from the table for which everything is exactly the same as the new, normalized, file-duplicate sanitized record
+                time_mask = (normalized_df == normalized_record).all(axis=1)
+                
+                # If the sanitized record already exists, simply update its timestamp
+                if time_mask.any():
+                    df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+                else:
+                # Otherwise, the record is brand new, so set the new record's file list to the list of unique files, and add it to the table
+                    new_record['file_urls'] = list(unique_files)
+                    df.loc[len(df)] = new_record
+            else:
+                # As this record has no unique files, check if this exact record already exists
+                time_mask = (normalized_df == normalized_record).all(axis=1)
+                
+                # If so, simply update its timestamp
+                if time_mask.any():
+                    df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+                else:
+                # Otherwise, if the new record contains all duplicate files, but does not already exist in the table, 
+                # this record contains no new information, so simply update every record's timestamp which contains a file in this record
+                    file_mask = file_mask.all(axis=1)
+                    df.loc[file_mask, "package_last_checked"] = new_record["package_last_checked"]
+        else:
+            # Otherwise, only check if the record already exists
+            time_mask = (normalized_df == normalized_record).all(axis=1)
+            
+            # If so, update its timestamp
+            if time_mask.any():
+                df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+            else:
+            # If the new record neither contains duplicate files, nor already exists in the table, simply add it to the table
+                df.loc[len(df)] = new_record
+        
+        # Return the newly updated table
+        return df
+    
+    def upload_metadata(self, item):
+        # Fetch current policy document metadata from s3 bucket, or create new dataframes for them if they dont exist
+        master_table = self.fetch_doc_data("doc-data/master_table.csv")
+        
+        # Create new dataframe records from currently collected metadata in the item
+        new_record = pd.Series(dict(item))
+
+        # Insert new file package metadata records into appropriate tables, and print the resulting tables to the console for confirmation
+        master_table = self.insert_or_update(master_table, new_record)
+
+        state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
+        file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
+
+        master_table.to_csv("medscraper/policy-docs/master_table.csv")
+        state_table.to_csv("medscraper/policy-docs/state_table.csv")
+        file_count_table.to_csv("medscraper/policy-docs/file_count_table.csv")
+        
+        # Finally, upload new file package metadata dataframes to s3 bucket
+        try:
+            s3 = boto3.client('s3')
+            for file, key in zip([master_table, state_table, file_count_table], ["doc-data/master_table.csv", "doc-data/state_table.csv", "doc-data/file_count_table.csv"]):
+                csv_buffer = io.StringIO()
+                file.to_csv(csv_buffer, index=False)
+
+                s3.put_object(
+                    Bucket=S3_BUCKET,
+                    Key=key,
+                    Body=csv_buffer.getvalue(),
+                    ContentType="text/csv"
+                )
+        except ClientError as e:
+            print(e.response) 
 
     
 

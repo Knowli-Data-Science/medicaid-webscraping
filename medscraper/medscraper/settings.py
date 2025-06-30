@@ -74,10 +74,10 @@ COOKIES_ENABLED = False
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {"medscraper.pipelines.MedscraperPipeline": 1}
 
-# Local storage for testing saving scraped policy documents
+# AWS storage for testing saving scraped policy documents
 FILES_STORE = "s3://webscraped-docs-test/"
 
-# S3 Bucket settings
+# S3 Bucket setting
 S3_BUCKET = 'webscraped-docs-test'
 
 MEDIA_ALLOW_REDIRECTS = True

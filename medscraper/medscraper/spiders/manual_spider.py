@@ -64,8 +64,8 @@ class ManualSpider(scrapy.Spider):
         "https://www.dmas.virginia.gov/": "Virginia"
     }
 
-    # Helper function, fetching each metadata dataframe if it exists in the s3 bucket, and creating new ones if not
-    def fetch_doc_data(file_path):
+    # Helper function, fetching the main metadata dataframe if it exists in the s3 bucket, and creating a new one if not
+    def fetch_doc_data(self, file_path):
         s3 = boto3.client('s3')
 
         try:
@@ -78,11 +78,10 @@ class ManualSpider(scrapy.Spider):
 
             # Otherwise, form new dataframes in the correct configuration
             return pd.DataFrame(columns=["file_urls", "package_state", "package_site_path", "package_file_count", "package_retrieval_date", "package_last_checked"])
-                
-    def insert_or_update(df: pd.DataFrame, new_record: pd.Series) -> pd.DataFrame:
-        ignore_cols = {"package_retrieval_date", "package_last_checked"}
-        compare_cols = [col for col in df.columns if col not in ignore_cols]
-
+    
+    # Function for inserting new records, or updating previous records after sanitization, and prevention of duplicate records to the dataframe 
+    def insert_or_update(self, df: pd.DataFrame, new_record: pd.Series) -> pd.DataFrame:    
+        # Helper function to sanitize incoming data from dataframes/series
         def normalize(value):
             if isinstance(value, str):
                 # Try to parse list-like strings into real lists
@@ -97,12 +96,17 @@ class ManualSpider(scrapy.Spider):
                 return tuple(value)
             return value
         
-        compare_df = df[compare_cols].map(normalize)
-        compare_record = pd.Series({k: normalize(new_record[k]) for k in compare_cols})
+        # Create a set of which columns to ignore and which to consider when making comparisons;
+        # ignore timestamps, and create a list of every other column to compare between main table and new record
+        ignore_cols = {"package_retrieval_date", "package_last_checked"}
+        compare_cols = [col for col in df.columns if col not in ignore_cols]
 
-        mask = (compare_df == compare_record).all(axis=1)
-        
-        file_mask = compare_df[compare_df['file_urls'].apply(lambda x: bool(set(x).intersection(set(compare_record['file_urls']))))]
+        # Take only the considered columns from the table and new record, and normalize them
+        normalized_df = df[compare_cols].map(normalize)
+        normalized_record = pd.Series({k: normalize(new_record[k]) for k in compare_cols})
+
+        # Get only the rows from the table containing any of the file URLs present in the new record
+        file_mask = normalized_df[normalized_df['file_urls'].apply(lambda x: bool(set(x).intersection(set(normalized_record['file_urls']))))]
         
         # for idx, row in df[compare_cols].iterrows():
         #     print(f"\n--- Row {idx} ---")
@@ -113,34 +117,57 @@ class ManualSpider(scrapy.Spider):
         #         print(f"  DataFrame value: {df_val!r} (type: {type(df_val)})")
         #         print(f"  New record value: {record_val!r} (type: {type(record_val)})")
 
-        if mask.any():     
-            df.loc[mask, "package_last_checked"] = new_record["package_last_checked"]
-            
-            if not file_mask.empty:
-                logger.info("DUPLICATE FILES DETECTED:")
+        # If there exist any rows from the table which contain a file URL matching one in the new record,
+        if not file_mask.empty:
+            # Create a new set containing every file URL from every row that was retrieved
+            matched_rows = set().union(*file_mask['file_urls'])
+            # Make a set out of the new record's file URLs
+            nr_files = set(new_record['file_urls'])
+            # Subtract the matched files from the new record's set of file URLs, and whatever is left is new
+            unique_files = nr_files - matched_rows
+                    
+            # If there are any unique files left,
+            if unique_files:
+                # Set the normalized record's list of files to the list of unique files, for comparison
+                normalized_record['file_urls'] = tuple(unique_files)
                 
-                matched_rows = set().union(*file_mask['file_urls'])
-                nr_files = set(new_record['file_urls'])
-                unique_files = matched_rows - nr_files
-                        
-                if unique_files:
+                # Retrieve the row from the table for which everything is exactly the same as the new, normalized, file-duplicate sanitized record
+                time_mask = (normalized_df == normalized_record).all(axis=1)
+                
+                # If the sanitized record already exists, simply update its timestamp
+                if time_mask.any():
+                    df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+                else:
+                # Otherwise, the record is brand new, so set the new record's file list to the list of unique files, and add it to the table
                     new_record['file_urls'] = list(unique_files)
                     df.loc[len(df)] = new_record
-        elif not file_mask.empty:
-                logger.info("DUPLICATE FILES DETECTED:")
+            else:
+                # As this record has no unique files, check if this exact record already exists
+                time_mask = (normalized_df == normalized_record).all(axis=1)
                 
-                matched_rows = set().union(*file_mask['file_urls'])
-                nr_files = set(new_record['file_urls'])
-                unique_files = matched_rows - nr_files
-                        
-                if unique_files:
-                    new_record['file_urls'] = list(unique_files)
-                    df.loc[len(df)] = new_record
+                # If so, simply update its timestamp
+                if time_mask.any():
+                    df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+                else:
+                # Otherwise, if the new record contains all duplicate files, but does not already exist in the table, 
+                # this record contains no new information, so simply update every record's timestamp which contains a file in this record
+                    file_mask = file_mask.all(axis=1)
+                    df.loc[file_mask, "package_last_checked"] = new_record["package_last_checked"]
         else:
-            df.loc[len(df)] = new_record
+            # Otherwise, only check if the record already exists
+            time_mask = (normalized_df == normalized_record).all(axis=1)
+            
+            # If so, update its timestamp
+            if time_mask.any():
+                df.loc[time_mask, "package_last_checked"] = new_record["package_last_checked"]
+            else:
+            # If the new record neither contains duplicate files, nor already exists in the table, simply add it to the table
+                df.loc[len(df)] = new_record
         
+        # Return the newly updated table
         return df
     
+    # Function for checking if the url being requested begins with one of the desired base paths
     def is_allowed_url(self, url):
         return any(url.startswith(prefix) for prefix in self.valid_base_urls)
     
@@ -212,13 +239,13 @@ class ManualSpider(scrapy.Spider):
         file_package_item = loader.load_item()
 
         # Fetch current policy document metadata from s3 bucket, or create new dataframes for them if they dont exist
-        master_table = ManualSpider.fetch_doc_data("doc-data/master_table.csv")
+        master_table = self.fetch_doc_data("doc-data/master_table.csv")
         
         # Create new dataframe records from currently collected metadata in the item
         new_record = pd.Series(dict(file_package_item))
 
         # Insert new file package metadata records into appropriate tables, and print the resulting tables to the console for confirmation
-        master_table = ManualSpider.insert_or_update(master_table, new_record)
+        master_table = self.insert_or_update(master_table, new_record)
 
         state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
         file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
@@ -241,7 +268,7 @@ class ManualSpider(scrapy.Spider):
                     ContentType="text/csv"
                 )
         except ClientError as e:
-            print(e.response)
+            print(e.response) 
 
         # Return the fully populated file package item, which uploads all collected policy documents to s3 bucket
         yield file_package_item
