@@ -43,12 +43,16 @@ class MedscraperPipeline(FilesPipeline):
         return "policy-docs/full/" + urlparse(request.url).path.split("/")[-1]
 
     def media_downloaded(self, response, request, info, *, item=None):
+        logger.info(f"ACCESSING RAW FILE COUNT: {item['package_file_count']}")
+        logger.info(f"ACCESSING NEW FILE COUNT: {len(item['file_urls'])}")
+        item['package_file_count'] = len(item['file_urls'])
+        self.upload_metadata(item)
         result = super().media_downloaded(response, request, info, item=item)
-        logger.info(f"[S3 File Pipeline] File storage result: {result}")
         return result
 
     def file_downloaded(self, response, request, info, *, item=None):
         # Compares the new hash to the existing one from S3
+        logger.info("HITTING FILE DOWNLOADED:")
         logger.info(f"[S3 File Pipeline] Downloaded {request.url} with status {response.status}")
         
         file_key = self.file_path(request, response=response, info=info, item=item)
@@ -210,6 +214,7 @@ class MedscraperPipeline(FilesPipeline):
     
     def upload_metadata(self, item):
         # Fetch current policy document metadata from s3 bucket, or create new dataframes for them if they dont exist
+        logger.info("HITTING UPLOAD METADATA IN PIPELINE:")
         master_table = self.fetch_doc_data("doc-data/master_table.csv")
         
         # Create new dataframe records from currently collected metadata in the item
@@ -221,25 +226,25 @@ class MedscraperPipeline(FilesPipeline):
         state_table = master_table.groupby(by = ['package_state', 'package_site_path']).agg({'package_file_count': 'sum'})
         file_count_table = master_table.groupby('package_state').agg({'package_file_count': 'sum'})
 
-        master_table.to_csv("medscraper/policy-docs/master_table.csv")
-        state_table.to_csv("medscraper/policy-docs/state_table.csv")
-        file_count_table.to_csv("medscraper/policy-docs/file_count_table.csv")
+        master_table.to_csv("medscraper/doc-data/master_table.csv")
+        state_table.to_csv("medscraper/doc-data/state_table.csv")
+        file_count_table.to_csv("medscraper/doc-data/file_count_table.csv")
         
         # Finally, upload new file package metadata dataframes to s3 bucket
-        try:
-            s3 = boto3.client('s3')
-            for file, key in zip([master_table, state_table, file_count_table], ["doc-data/master_table.csv", "doc-data/state_table.csv", "doc-data/file_count_table.csv"]):
-                csv_buffer = io.StringIO()
-                file.to_csv(csv_buffer, index=False)
+        # try:
+        #     s3 = boto3.client('s3')
+        #     for file, key in zip([master_table, state_table, file_count_table], ["doc-data/master_table.csv", "doc-data/state_table.csv", "doc-data/file_count_table.csv"]):
+        #         csv_buffer = io.StringIO()
+        #         file.to_csv(csv_buffer, index=False)
 
-                s3.put_object(
-                    Bucket=S3_BUCKET,
-                    Key=key,
-                    Body=csv_buffer.getvalue(),
-                    ContentType="text/csv"
-                )
-        except ClientError as e:
-            print(e.response) 
+        #         s3.put_object(
+        #             Bucket=S3_BUCKET,
+        #             Key=key,
+        #             Body=csv_buffer.getvalue(),
+        #             ContentType="text/csv"
+        #         )
+        # except ClientError as e:
+        #     print(e.response) 
 
     
 
