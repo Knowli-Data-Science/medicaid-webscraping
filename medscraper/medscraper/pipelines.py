@@ -3,7 +3,6 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
-
 # useful for handling different item types with a single interface
 import io
 import hashlib
@@ -17,21 +16,18 @@ from scrapy.pipelines.files import FilesPipeline
 from scrapy.exceptions import DropItem
 from botocore.errorfactory import ClientError
 
-# S3 Bucket setting
-S3_BUCKET = 'webscraped-docs-test'
-
 logger = logging.getLogger(__name__)
 
 class MedscraperPipeline(FilesPipeline):
     def __init__(self, store_uri, download_func=None, settings=None, *args, **kwargs):
         super().__init__(store_uri, download_func, settings, *args, **kwargs)
-        self.s3 = None
+        self.s3_client = None
         self.s3_bucket = None
 
     @classmethod
     def from_crawler(cls, crawler):
         pipeline = super().from_crawler(crawler)
-        pipeline.s3 = boto3.client('s3')
+        pipeline.s3_client = boto3.client('s3')
         pipeline.s3_bucket = crawler.settings.get('S3_BUCKET')
         return pipeline
 
@@ -43,8 +39,6 @@ class MedscraperPipeline(FilesPipeline):
         return "policy-docs/full/" + urlparse(request.url).path.split("/")[-1]
 
     def media_downloaded(self, response, request, info, *, item=None):
-        logger.info(f"ACCESSING RAW FILE COUNT: {item['package_file_count']}")
-        logger.info(f"ACCESSING NEW FILE COUNT: {len(item['file_urls'])}")
         item['package_file_count'] = len(item['file_urls'])
         self.upload_metadata(item)
         result = super().media_downloaded(response, request, info, item=item)
@@ -55,33 +49,38 @@ class MedscraperPipeline(FilesPipeline):
         logger.info("HITTING FILE DOWNLOADED:")
         logger.info(f"[S3 File Pipeline] Downloaded {request.url} with status {response.status}")
         
+        # Get the path of the key in the s3 bucket, and hash the newly scraped file's contents
         file_key = self.file_path(request, response=response, info=info, item=item)
         new_hash = hashlib.sha256(response.body).hexdigest()
 
         try:
-            s3_file = self.s3.get_object(Bucket=self.s3_bucket, Key=file_key)
+            # Retrieve the local version of the file from the s3 bucket, and hash its contents
+            s3_file = self.s3_client.get_object(Bucket=self.s3_bucket, Key=file_key)
             existing_hash = hashlib.sha256(s3_file["Body"].read()).hexdigest()
             logger.info(f"[S3 File Pipeline] File Hashes for {file_key}:\n Existing - {existing_hash}\n New - {new_hash}")
 
+            # If the hashes match, the file contents have not changed, so drop the file from the package
             if new_hash == existing_hash:
                 logger.info(f"[S3 File Pipeline] Skipping unchanged file: {file_key}")
                 item["file_urls"].remove(request.url)
                 raise DropItem(f"[S3 File Pipeline] File unchanged: {file_key}")
             else:
+                # Otherwise, the file contents have changed, so re-download the file
                 logger.info(f"[S3 File Pipeline] Changed file {file_key}; Downloading...")
                 item["file_urls"].append(request.url)
                 content_type = self._get_content_type(file_key)            
-                self.s3.put_object(
+                self.s3_client.put_object(
                     Bucket=self.s3_bucket,
                     Key=file_key,
                     Body=response.body,
                     ContentType=content_type
                 )
-        except self.s3.exceptions.NoSuchKey:
+        except self.s3_client.exceptions.NoSuchKey:
+            # Otherwise, if the file is not found in the s3 bucket, it's new, so upload to AWS
             logger.info(f"[S3 File Pipeline] New file {file_key}; Downloading...")
             item["file_urls"].append(request.url)
             content_type = self._get_content_type(file_key)            
-            self.s3.put_object(
+            self.s3_client.put_object(
                 Bucket=self.s3_bucket,
                 Key=file_key,
                 Body=response.body,
@@ -111,11 +110,9 @@ class MedscraperPipeline(FilesPipeline):
     
     # Helper function, fetching the main metadata dataframe if it exists in the s3 bucket, and creating a new one if not
     def fetch_doc_data(self, file_path):
-        s3 = boto3.client('s3')
-
         try:
             # Fetch the requested file's dataframe from the s3 bucket if it exists
-            obj = s3.get_object(Bucket=S3_BUCKET, Key=file_path)
+            obj = self.s3_client.get_object(Bucket=self.s3_bucket, Key=file_path)
             table = pd.read_csv(obj['Body'])
             return table
         except ClientError as e:
@@ -185,6 +182,8 @@ class MedscraperPipeline(FilesPipeline):
                 else:
                 # Otherwise, the record is brand new, so set the new record's file list to the list of unique files, and add it to the table
                     new_record['file_urls'] = list(unique_files)
+                    new_record['package_file_count'] = len(list(unique_files))
+                    logger.info(f"NEW RECORD INSERTED: {new_record}")
                     df.loc[len(df)] = new_record
             else:
                 # As this record has no unique files, check if this exact record already exists
@@ -231,20 +230,19 @@ class MedscraperPipeline(FilesPipeline):
         file_count_table.to_csv("medscraper/doc-data/file_count_table.csv")
         
         # Finally, upload new file package metadata dataframes to s3 bucket
-        # try:
-        #     s3 = boto3.client('s3')
-        #     for file, key in zip([master_table, state_table, file_count_table], ["doc-data/master_table.csv", "doc-data/state_table.csv", "doc-data/file_count_table.csv"]):
-        #         csv_buffer = io.StringIO()
-        #         file.to_csv(csv_buffer, index=False)
+        try:
+            for file, key in zip([master_table, state_table, file_count_table], ["doc-data/master_table.csv", "doc-data/state_table.csv", "doc-data/file_count_table.csv"]):
+                csv_buffer = io.StringIO()
+                file.to_csv(csv_buffer, index=False)
 
-        #         s3.put_object(
-        #             Bucket=S3_BUCKET,
-        #             Key=key,
-        #             Body=csv_buffer.getvalue(),
-        #             ContentType="text/csv"
-        #         )
-        # except ClientError as e:
-        #     print(e.response) 
+                self.s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=key,
+                    Body=csv_buffer.getvalue(),
+                    ContentType="text/csv"
+                )
+        except ClientError as e:
+            print(e.response) 
 
     
 
