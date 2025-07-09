@@ -46,7 +46,7 @@ class MedscraperPipeline(FilesPipeline):
 
     def file_downloaded(self, response, request, info, *, item=None):
         # Compares the new hash to the existing one from S3
-        logger.info("HITTING FILE DOWNLOADED:")
+        # logger.info("HITTING FILE DOWNLOADED:")
         logger.info(f"[S3 File Pipeline] Downloaded {request.url} with status {response.status}")
         
         # Get the path of the key in the s3 bucket, and hash the newly scraped file's contents
@@ -183,7 +183,6 @@ class MedscraperPipeline(FilesPipeline):
                 # Otherwise, the record is brand new, so set the new record's file list to the list of unique files, and add it to the table
                     new_record['file_urls'] = list(unique_files)
                     new_record['package_file_count'] = len(list(unique_files))
-                    logger.info(f"NEW RECORD INSERTED: {new_record}")
                     df.loc[len(df)] = new_record
             else:
                 # As this record has no unique files, check if this exact record already exists
@@ -213,7 +212,7 @@ class MedscraperPipeline(FilesPipeline):
     
     def upload_metadata(self, item):
         # Fetch current policy document metadata from s3 bucket, or create new dataframes for them if they dont exist
-        logger.info("HITTING UPLOAD METADATA IN PIPELINE:")
+        # logger.info("HITTING UPLOAD METADATA IN PIPELINE:")
         master_table = self.fetch_doc_data("doc-data/master_table.csv")
         
         # Create new dataframe records from currently collected metadata in the item

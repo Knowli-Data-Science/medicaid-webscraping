@@ -3,18 +3,25 @@
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
-from scrapy import signals
-import boto3
-import hashlib
+import scrapy
+import requests
 import os
-from pathlib import PurePosixPath
-from scrapy.utils.httpobj import urlparse_cached
-from scrapy.exceptions import IgnoreRequest
-from botocore.errorfactory import ClientError
-from urllib.parse import urlparse, unquote
-
+import logging
+from scrapy import signals
+from scrapy.http import HtmlResponse
+from dotenv import load_dotenv
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
+
+# Env file with api key
+ENV_PATH = ".env"
+logger = logging.getLogger(__name__)
+
+if os.path.exists(ENV_PATH):
+    load_dotenv(ENV_PATH, override=True)
+    print(f"✅ Loaded environment variables from {ENV_PATH}")
+else:
+    raise FileNotFoundError(f"🚨 .env file not found at {ENV_PATH}")
 
 
 class MedscraperSpiderMiddleware:
@@ -65,78 +72,32 @@ class MedscraperDownloaderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
     # scrapy acts as if the downloader middleware does not modify the
     # passed objects.
-    def __init__(self, s3_bucket, s3_folder):
-        self.s3_bucket = s3_bucket
-        self.s3_folder = s3_folder
-        self.s3 = boto3.client('s3')
+    def __init__(self):
+        self.api_key = os.getenv('ZENROWS_API_KEY')
 
     @classmethod
     def from_crawler(cls, crawler):
         # This method is used by Scrapy to create your spiders.
-        s = cls(
-            s3_bucket=crawler.settings.get('S3_BUCKET'),
-            s3_folder=crawler.settings.get('S3_FOLDER')
-        )
+        s = cls()
         crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
         return s
 
     def process_request(self, request, spider):
         # Called for each request that goes through the downloader
-        # middleware.
-
-        # Must either:
-        # - return None: continue processing this request
-        # - or return a Response object
-        # - or return a Request object
-        # - or raise IgnoreRequest: process_exception() methods of
-        #   installed downloader middleware will be called
-        return None
-
-    def process_response(self, request, response, spider):
-        # Called with the response returned from the downloader.
-
-        # Must either;
-        # - return a Response object
-        # - return a Request object
-        # - or raise IgnoreRequest
-        is_file = response.headers.get('Content-Type', b'').decode().lower()
-        print("HERE IS FILE: ", is_file)
-        print("RESPONSE: ", response.url)
-        if not is_file or 'application' not in is_file:
-            print("IS NOT FILE HERE")
-            return response
+        # middleware. Modifies the request object to send requests through ZenRows' API to handle User Agent rotation at scale
         
-        new_file_hash = hashlib.md5(response.body).hexdigest()
+        # Set the url to the target page being requested
+        target_url = request.url
+        # Form a proxy url to go through ZenRows and allow it to handle user agent rotation/proxying
+        proxy_url = (
+            f"https://api.zenrows.com/v1/"
+            f"?apikey={self.api_key}"
+            f"&url={target_url}"
+        )
 
-        file_key = f"{self.s3_folder}/{self.get_s3_key(response.url)}"
-
-        if self.s3_file_exists(file_key):
-            local_file_hash = self.get_s3_file_hash(file_key)
-            if new_file_hash == local_file_hash:
-                spider.logger.info(f"[S3 Middleware] File contents unchanged; Skipping file: {file_key}")
-                raise IgnoreRequest
-            
-        return response
-        
-    def get_s3_key(self, url):
-        path = urlparse(url).path
-        return os.path.basename(unquote(path))
-    
-    def s3_file_exists(self, key):
-        try:
-            self.s3.head_object(Bucket=self.s3_bucket, Key=key)
-            return True
-        except ClientError as e:
-            print(e.response)
-            if e.response['Error']['Code'] == '404':
-                return False
-            raise
-
-    def get_s3_file_hash(self, key):
-        file = self.s3.get_object(Bucket=self.s3_bucket, Key=key)
-        body = file['Body'].read()
-        print("FILE BODY: ", body)
-        return hashlib.md5(body).hexdigest()
+        request._original_url = request.url  # Optional, if the script needs to recover after failure
+        request.replace(url=proxy_url) # Set the request's url to the new proxy url 
+        request.headers.pop('User-Agent', None)  # Let ZenRows API set the User-Agent tag
             
     def process_exception(self, request, exception, spider):
         # Called when a download handler or a process_request()

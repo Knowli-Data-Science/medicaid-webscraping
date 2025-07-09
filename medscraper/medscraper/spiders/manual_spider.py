@@ -1,30 +1,9 @@
-from pathlib import Path
-
-import io
-import os
 import scrapy
 import re
-import ast
 import us.states
-import pandas as pd
-import boto3
-import logging
 from medscraper.items import PolicyManualsPackage
 from scrapy.loader import ItemLoader
 from datetime import datetime
-from botocore.errorfactory import ClientError
-from zenrows import ZenRowsClient
-from dotenv import load_dotenv
-
-# Env file with api key
-ENV_PATH = ".env"
-logger = logging.getLogger(__name__)
-
-if os.path.exists(ENV_PATH):
-    load_dotenv(ENV_PATH, override=True)
-    print(f"✅ Loaded environment variables from {ENV_PATH}")
-else:
-    raise FileNotFoundError(f"🚨 .env file not found at {ENV_PATH}")
 
 # Custom scrapy spider class ManualSpider; extracts the most recent Billing Provider Policy Manual document files from state healthcare
 # sites, uploads the relevant/updated files, and collects and uploads metadata about the sites it visits and the files downloaded from
@@ -77,8 +56,6 @@ class ManualSpider(scrapy.Spider):
         return any(url.startswith(prefix) for prefix in self.valid_base_urls)
     
     async def start(self):
-        # Import the zenrows api key from .env file
-        zenrows_client = ZenRowsClient(os.getenv('ZENROWS_API_KEY'))
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
             # "https://aaaaspider.com",
@@ -94,8 +71,7 @@ class ManualSpider(scrapy.Spider):
         ]
         
         for url in urls:
-            response = zenrows_client.get(url)
-            yield response
+            yield scrapy.Request(url=url, callback=self.parse)
 
     def parse(self, response):
         # Load in the custom scrapy item class PolicyManualsPackage, representing a package of files and its metadata downloaded from a particular url
