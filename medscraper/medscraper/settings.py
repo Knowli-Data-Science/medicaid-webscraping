@@ -83,7 +83,7 @@ S3_BUCKET = 'webscraped-docs-test'
 MEDIA_ALLOW_REDIRECTS = True
 MEDIA_PIPELINES_ENABLED = True
 
-# 30 days of delay for files expiration
+# 0 days of delay for file expiration, since we're always checking files contents before re-downloading
 FILES_EXPIRES = 0
 
 LOG_LEVEL = 'DEBUG'

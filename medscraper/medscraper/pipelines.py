@@ -195,7 +195,12 @@ class MedscraperPipeline(FilesPipeline):
                 # Otherwise, if the new record contains all duplicate files, but does not already exist in the table, 
                 # this record contains no new information, so simply update every record's timestamp which contains a file in this record
                     file_mask = file_mask.all(axis=1)
-                    df.loc[file_mask, "package_last_checked"] = new_record["package_last_checked"]
+                    # Convert the file mask's contents to native python booleans as opposed to numpy.bool_
+                    file_mask = file_mask.astype(bool)
+                    # Retrieve only the matching indices from the file mask
+                    matching_indices = file_mask[file_mask].index
+                    # Update the time stamp of the appropriate records
+                    df.loc[matching_indices, "package_last_checked"] = new_record["package_last_checked"]
         else:
             # Otherwise, only check if the record already exists
             time_mask = (normalized_df == normalized_record).all(axis=1)

@@ -59,7 +59,7 @@ class ManualSpider(scrapy.Spider):
         # State healthcare sites which the spider will begin crawling from, extracting policy documents as it goes
         urls = [
             # "https://aaaaspider.com",
-            # "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
+            "https://ahca.myflorida.com/medicaid/rules/adopted-rules-general-policies",
             # "https://pamms.dhs.ga.gov/dfcs/medicaid/",
             # "https://www.kymmis.com/kymmis/Provider%20Relations/billingInst.aspx",
             # "https://www.tn.gov/tenncare/policy-guidelines/eligibility-policy.html",
