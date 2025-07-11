@@ -1,8 +1,7 @@
 # Medicaid Policy Document Webscraper -- Medscraper
 
    ### 
-   Primary Developer:
-   - Ian Estevez
+   Primary Developer: Ian Estevez, Software Developer Intern 2025
 
    ###
    Description:
@@ -24,4 +23,4 @@
    
    ###
    Important Dependencies:
-   Python3, Boto3, Botocore, Pandas, Hashlib, Urllib
+   Scrapy, Python3, Boto3, Botocore, Pandas, Hashlib, Urllib
