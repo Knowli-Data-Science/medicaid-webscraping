@@ -1,7 +1,8 @@
 # Medicaid Policy Document Webscraper -- Medscraper
 
-# Primary Developer:
-- Ian Estevez
+   ### 
+   Primary Developer:
+   - Ian Estevez
 
    ###
    Description:
